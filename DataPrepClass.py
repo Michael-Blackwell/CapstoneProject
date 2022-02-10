@@ -79,7 +79,7 @@ class DataPrep:
         return tf.train.Feature(int64_list=tf.train.Int64List(value=[value]))
 
     def load_image(self, filepath: str) -> np.ndarray:
-        """Load and resize an image."""
+        """Load an image, resize it, and normalize the pixel values."""
         image = cv2.imread(filepath)
         image = cv2.resize(image, self.image_size[0:2], interpolation=cv2.INTER_LANCZOS4)  # TODO why interpolate?
         image = image / np.max(image)
@@ -87,10 +87,9 @@ class DataPrep:
         return image
 
     def get_labels(self) -> pd.DataFrame:
-        """Read the labels excel file and split records into training and validation sets using a stratified shuffle
+        """Read the labels csv and set the index & dtypes of the fields
         :return
-        returns two dataframes, training and validation, containing filepaths for each patient and labels.
-        (Training df, Validation df)"""
+            returns a dataframe of binary labels indexed by image ID."""
 
         # Create folders for pre-processed training and validation images, replace if existing.
         out = Path.cwd() / self.data_type
@@ -104,8 +103,8 @@ class DataPrep:
         return self.labels
 
     def write_to_tfr(self, data: list, filename: str) -> None:
-        """Loop over list elements (dicts) and write each of them to a tfr file."""
-        # Compress using Gzip format since the dataset is so large.
+        """Loop over list elements (which are dicts) and write each of them to the tfr file."""
+        # Compress using Gzip format.
         option = tf.io.TFRecordOptions(compression_type="GZIP")
 
         # Write the files to the output folder.
@@ -117,7 +116,7 @@ class DataPrep:
                 writer.write(bin_data)
 
     def preprocess_images(self, divided_labels):
-        """Call load_image to load, preprocess, serialize, and save images as tensors with dimensions 'img_size'
+        """Essentially a function call: load, preprocess, & convert images to tensors:
         Output as a serialized TFRecord object (based on protobuf protocol)."""
 
         tfr_data = []
@@ -139,8 +138,6 @@ class DataPrep:
 
             mask_tensor = tf.convert_to_tensor(mask)
             mask_tensor_ser = tf.io.serialize_tensor(mask_tensor)
-            # Reshape tensor (batch, image height, image width, image depth)
-            # image_tensor = tf.reshape(image_tensor, (self.image_size[0], self.image_size[1], self.image_size[2]))
 
             # Add features to dict for TFR file
             img_data['image'] = self._bytes_feature(image_tensor_ser)
@@ -158,14 +155,7 @@ class DataPrep:
             # Add to list of files to write to tfr file
             tfr_data.append(img_data)
 
-            # count += 1
-
-            # Every n images, write to tfr file.
-            # if count % self.tfr_size == 0:
-            #     self.write_to_tfr(tfr_data, str(count))
-            #     tfr_data = []
-
-        # After exiting loop, write any remaining data to one final file.
+        # After all images are loaded, write to tfr file.
         if tfr_data:
             self.write_to_tfr(tfr_data, str(count))
 
@@ -188,7 +178,7 @@ class DataPrep:
             yield df, count
 
     def compile_tfrecord_files(self) -> None:
-        """Preprocess samples from the dataset into a TFRecord file."""
+        """Concurrently preprocess samples from the dataset into a TFRecord file."""
 
         self.get_labels()
 

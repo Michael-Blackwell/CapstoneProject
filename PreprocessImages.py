@@ -1,4 +1,4 @@
-from DataPrepFunctions import *
+from DataPrepClass import *
 
 
 if __name__ == '__main__':
