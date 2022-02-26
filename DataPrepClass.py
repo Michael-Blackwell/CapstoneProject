@@ -3,7 +3,11 @@ import numpy as np
 import cv2
 import pandas as pd
 import tensorflow as tf
+import tensorflow_datasets as tfds
+import pickle
+import yaml
 from pathlib import Path
+import math
 from multiprocessing.pool import ThreadPool
 
 
@@ -40,10 +44,11 @@ class DataPrep:
                  labels_path,
                  data_path,
                  mask_path,
+                 dataset,
                  data_type,
                  jobs,
                  image_size=(1024, 1024, 3),
-                 tfr_file_size=100):
+                 tfr_file_size=128):
 
         # Verify dataset type is valid
         datatypes = ['train', 'val', 'test']
@@ -54,12 +59,21 @@ class DataPrep:
         self.mask_path = mask_path
         self.image_size = image_size
         self.label_path = labels_path
-        self.train_data_path = data_path
+        self.data_path = data_path
         self.labels = None
         self.tfr_size = tfr_file_size
-        self.output_path = Path.cwd() / f'{data_type}_tr'
-        self.output_path.mkdir(exist_ok=True)
+        self.output_path = Path.cwd() / f'Data/{dataset}/{data_type}_tr'
+        self.output_path.mkdir(exist_ok=True, parents=True)
         self.jobs = jobs
+        self.dataset = dataset
+        self.total_records = None
+
+    def count_records(self):
+        rec_count = 0
+        for record in self.data_path.iterdir():
+            if record.suffix == '.jpg':
+                rec_count += 1
+        self.total_records = int(math.ceil(rec_count / self.tfr_size))
 
     @staticmethod
     def _bytes_feature(value):
@@ -102,13 +116,36 @@ class DataPrep:
 
         return self.labels
 
+    def generate_config(self):
+        """Generate metadata files for the dataset."""
+
+        dataset_info = {
+            'TrainTestVal': self.data_type,
+            'ImageSize': self.image_size,
+            'DatasetName': self.dataset,
+            'TotalRecords': self.total_records,
+            'TFRFileSize': self.tfr_size
+        }
+        features = tfds.features.FeaturesDict({
+            'image': tfds.features.Image(shape=self.image_size),
+            'mask': tfds.features.Image(shape=self.image_size),
+            'melanoma_label': tfds.features.ClassLabel(num_classes=2),
+            'keratosis_label': tfds.features.ClassLabel(num_classes=2),
+            'ID': tf.string,
+        })
+        with open(str(self.output_path / 'features.pickle'), 'wb') as f:
+            pickle.dump(features, f)
+
+        with open(str(self.output_path / 'info.yml'), 'w') as f:
+            yaml.dump(dataset_info, f)
+
     def write_to_tfr(self, data: list, filename: str) -> None:
         """Loop over list elements (which are dicts) and write each of them to the tfr file."""
         # Compress using Gzip format.
         option = tf.io.TFRecordOptions(compression_type="GZIP")
 
         # Write the files to the output folder.
-        with tf.io.TFRecordWriter(str(self.output_path / f"{filename}.tfrec"), options=option) as writer:
+        with tf.io.TFRecordWriter(str(self.output_path / filename), options=option) as writer:
             for element in data:
                 # Create the binary TFRecord object and serialize the data into a byte string
                 bin_data = tf.train.Example(features=tf.train.Features(feature=element))
@@ -126,7 +163,7 @@ class DataPrep:
             img_data = {}
 
             # read image and mask files, resizing and pixel normalization takes place upon load.
-            img_path = str(self.train_data_path / (image_id + '.jpg'))
+            img_path = str(self.data_path / (image_id + '.jpg'))
             mask_path = str(self.mask_path / (image_id + '_segmentation.png'))
             image = self.load_image(img_path)
             mask = self.load_image(mask_path)
@@ -145,9 +182,9 @@ class DataPrep:
 
             bin_id = bytes(image_id, encoding='utf-8')
 
-            img_data['image_width'] = self._int64_feature(self.image_size[0])
-            img_data['image_height'] = self._int64_feature(self.image_size[1])
-            img_data['image_channels'] = self._int64_feature(self.image_size[2])
+            # img_data['image_width'] = self._int64_feature(self.image_size[0])
+            # img_data['image_height'] = self._int64_feature(self.image_size[1])
+            # img_data['image_channels'] = self._int64_feature(self.image_size[2])
             img_data['melanoma_label'] = self._int64_feature(self.labels.loc[image_id, 'melanoma'])
             img_data['keratosis_label'] = self._int64_feature(self.labels.loc[image_id, 'seborrheic_keratosis'])
             img_data['ID'] = self._bytes_feature(bin_id)
@@ -157,21 +194,24 @@ class DataPrep:
 
         # After all images are loaded, write to tfr file.
         if tfr_data:
-            self.write_to_tfr(tfr_data, str(count))
+            # https://www.tensorflow.org/datasets/external_tfrecord#file_naming_convention
+            filecount = f'{str(count).zfill(5)}-of-{str(self.total_records).zfill(5)}'
+            filename = f'{self.dataset}-{self.data_type}.tfrecord-{filecount}'
+            self.write_to_tfr(tfr_data, filename)
 
     def data_prep_generator(self):
         """Generator used for multi-threading."""
-
         shuffled_labels = self.labels.sample(frac=1)
         df = pd.DataFrame(columns=shuffled_labels.columns)
         count = 0
 
         for idx, data in shuffled_labels.iterrows():
             df.loc[idx] = data
-            count += 1
+            # count += 1
 
             if len(df) == self.tfr_size:
                 yield df, count
+                count += 1
                 df = pd.DataFrame(columns=shuffled_labels.columns)
 
         if not df.empty:
@@ -179,11 +219,15 @@ class DataPrep:
 
     def compile_tfrecord_files(self) -> None:
         """Concurrently preprocess samples from the dataset into a TFRecord file."""
+        self.count_records()
 
         self.get_labels()
 
         # Concurrently process files
-        file_total = len(self.labels)/self.tfr_size
+        file_count = int(np.ceil(len(self.labels) / self.tfr_size))
         preprocessed_imgs = ThreadPool(self.jobs).imap_unordered(self.preprocess_images, self.data_prep_generator())
-        for img_cnt in tqdm(preprocessed_imgs, total=file_total, desc=f'Preprocessing Training Data'):
+
+        for i in tqdm(preprocessed_imgs, total=file_count, desc=f'Preprocessing Training Data'):
             pass
+
+        self.generate_config()
