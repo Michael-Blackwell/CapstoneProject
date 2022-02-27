@@ -77,7 +77,7 @@ class Isic2017(tfds.core.GeneratorBasedBuilder):
             # If there's a common (input, target) tuple from the
             # features, specify them here. They'll be used if
             # `as_supervised=True` in `builder.as_dataset`.
-            supervised_keys=('image', 'label', 'mask'),  # Set to `None` to disable
+            supervised_keys=('image', ('mask', 'melanoma_label', 'keratosis_label')),  # Set to `None` to disable
             homepage='https://challenge.isic-archive.com/landing/2017/',
             citation=_CITATION,
         )
