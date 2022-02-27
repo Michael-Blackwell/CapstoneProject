@@ -3,16 +3,17 @@
 """
 import tensorflow as tf
 import tensorflow_datasets as tfds
+from pathlib import Path
+from datetime import datetime
 
 
-class ModelDataset:
+class DataPipe:
 
     def __init__(self,
                  dataset_name='isic2017',
                  dataset_path='/media/storage/Datasets',
                  batch=16,
                  image_size=(1024, 1024, 3)):
-
         (self.train, self.val, self.test), self._info = tfds.load(name=dataset_name,
                                                                   data_dir=str(dataset_path),
                                                                   as_supervised=False,
@@ -38,7 +39,11 @@ class ModelDataset:
         ds = ds.map(self._transform,
                     num_parallel_calls=tf.data.AUTOTUNE)
         ds = ds.cache()
-        ds = ds.shuffle(self._info.splits[split].num_examples)
+        ds = ds.map(lambda ex: ({'image': ex['image']},
+                                {#'mask': ex['mask'],
+                                            'melanoma_label': ex['melanoma_label'],
+                                            'keratosis_label': ex['keratosis_label']}))
+        ds = ds.shuffle(buffer_size=100)
         ds = ds.batch(self.batch)
         ds = ds.prefetch(tf.data.AUTOTUNE)
         return ds
@@ -70,6 +75,6 @@ class ModelDataset:
 
 
 # if __name__ == '__main__':
-#     test = ModelDataset()
+#     test = DataPipe()
 #     test.transform_all()
-#     test.visualize(test.test, 4, 'image')
+#     test.visualize(test.test, 4, 'Input')
