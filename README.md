@@ -2,9 +2,10 @@
 
 Author: Michael Blackwell
 
-Data Source: 2017 ISIC Dataset
+Data Source: 2017 ISIC Dataset - https://challenge.isic-archive.com/data/#2017
 
-https://challenge.isic-archive.com/data/#2017
+Data Source Home Page: https://challenge.isic-archive.com/landing/2017/
+
 
 ## Benchmark Models
 **U-Net**: https://github.com/IntelAI/unet
