@@ -1,34 +1,75 @@
 from ModelFunctions import *
 import tensorflow_addons as tfa
 import tensorboard
+import tensorflow.keras.backend as K
+from typing import Callable
+"""
+Focal Loss:
+https://www.tensorflow.org/addons/api_docs/python/tfa/losses/SigmoidFocalCrossEntropy
+"""
 
 timestamp = datetime.now().strftime('%m-%d-%Y_%H.%M.%S')
+
+
+def binary_focal_loss(beta: float, gamma: float = 2.) -> Callable[[tf.Tensor, tf.Tensor], tf.Tensor]:
+    """
+    Focal loss is derived from balanced cross entropy, where focal loss adds an extra focus on hard examples in the
+    dataset:
+        FL(p, p̂) = −[β*(1-p̂)ᵞ*p*log(p̂) + (1-β)*p̂ᵞ*(1−p)*log(1−p̂)]
+    When γ = 0, we obtain balanced cross entropy.
+    Paper: https://arxiv.org/pdf/1708.02002.pdf
+    Used as loss function for binary image segmentation with one-hot encoded masks.
+    :param beta: Weight coefficient (float)
+    :param gamma: Focusing parameter, γ ≥ 0 (float, default=2.)
+    :return: Focal loss (Callable[[tf.Tensor, tf.Tensor], tf.Tensor])
+    """
+    def loss(y_true: tf.Tensor, y_pred: tf.Tensor) -> tf.Tensor:
+        """
+        Computes the focal loss.
+        :param y_true: True masks (tf.Tensor, shape=(<BATCH_SIZE>, <IMAGE_HEIGHT>, <IMAGE_WIDTH>, 1))
+        :param y_pred: Predicted masks (tf.Tensor, shape=(<BATCH_SIZE>, <IMAGE_HEIGHT>, <IMAGE_WIDTH>, 1))
+        :return: Focal loss (tf.Tensor, shape=(<BATCH_SIZE>,))
+        """
+        f_loss = beta * (1 - y_pred) ** gamma * y_true * K.log(y_pred)  # β*(1-p̂)ᵞ*p*log(p̂)
+        f_loss += (1 - beta) * y_pred ** gamma * (1 - y_true) * K.log(1 - y_pred)  # (1-β)*p̂ᵞ*(1−p)*log(1−p̂)
+        f_loss = -f_loss  # −[β*(1-p̂)ᵞ*p*log(p̂) + (1-β)*p̂ᵞ*(1−p)*log(1−p̂)]
+
+        # Average over each data point/image in batch
+        axis_to_reduce = range(1, K.ndim(f_loss))
+        f_loss = K.mean(f_loss, axis=axis_to_reduce)
+
+        return f_loss
+
+    return loss
 
 
 def build_model(image_size, name='Model'):
     """Build a 3D convolutional neural network model
     There are many ways to do this."""
 
+    """Build a 3D convolutional neural network model
+        There are many ways to do this."""
+
     image = tf.keras.Input(shape=image_size, name='image')
 
-    kernelsize = 1
-    filters = 32
+    kernelsize = 5
+    filters = 100
 
     # Convolution
-    x = tf.keras.layers.Conv2D(filters=filters, kernel_size=kernelsize)(image)
+    x = tf.keras.layers.Conv2D(filters=filters, kernel_size=kernelsize, padding='same')(image)
     # f = tf.keras.layers.MaxPool3D(pool_size=3)(x)
     x = tf.keras.layers.Dropout(0.2)(x)
     x = tf.keras.layers.BatchNormalization()(x)
     x = tf.keras.layers.Activation('relu')(x)
 
     # Convolve again
-    x = tf.keras.layers.Conv2D(filters=2, kernel_size=1, activation='relu')(x)
+    x = tf.keras.layers.Conv2D(filters=1, kernel_size=1, activation='relu', padding='same')(x)
     # x = tf.keras.layers.MaxPool3D(pool_size=2)(x)
     x = tf.keras.layers.Dropout(0.2)(x)
     x = tf.keras.layers.BatchNormalization()(x)
     mask = tf.keras.layers.GlobalMaxPooling2D()(x)
     mask = tf.keras.layers.Activation('softmax', name='mask')(mask)
-    # TODO implement mask output
+
     # Flatten, Dense, Output
     # x = tf.keras.layers.Flatten()(x)
     # x = tf.keras.layers.Dense(units=50, activation="relu")(x)
@@ -36,11 +77,11 @@ def build_model(image_size, name='Model'):
     # keratosis = tf.keras.layers.Dense(units=1, activation='sigmoid', name='keratosis_label')(x)
 
     # Define the model.
-    model = tf.keras.Model(inputs=[image], outputs=[mask], name=name) #melanoma, keratosis], name=name)
+    model = tf.keras.Model(inputs=[image], outputs=[mask], name=name)  # melanoma, keratosis], name=name)
 
     # Compile model
     model.compile(
-        loss='categorical_crossentropy',  # tfa.losses.sigmoid_focal_crossentropy,
+        loss=tfa.losses.sigmoid_focal_crossentropy,  # 'categorical_crossentropy',  # tfa.losses.sigmoid_focal_crossentropy,
         optimizer='Adam',  # tf.keras.optimizers.Adam(learning_rate=lr_schedule),
         metrics=["accuracy"],
     )
@@ -105,7 +146,7 @@ def train_model(data_pipe, epochs: int):
 
 
 if __name__ == '__main__':
-    dataset = DataPipe(batch=5)
+    dataset = DataPipe(batch=1)
     dataset.transform_all()
     train_model(dataset, epochs=10)
 

@@ -13,7 +13,7 @@ class DataPipe:
                  dataset_name='isic2017',
                  dataset_path='/media/storage/Datasets',
                  batch=16,
-                 image_size=(1024, 1024, 3)):
+                 image_size=(512, 512, 3)):
         (self.train, self.val, self.test), self._info = tfds.load(name=dataset_name,
                                                                   data_dir=str(dataset_path),
                                                                   as_supervised=False,
@@ -40,9 +40,9 @@ class DataPipe:
                     num_parallel_calls=tf.data.AUTOTUNE)
         ds = ds.cache()
         ds = ds.map(lambda ex: ({'image': ex['image']},
-                                {#'mask': ex['mask'],
-                                            'melanoma_label': ex['melanoma_label'],
-                                            'keratosis_label': ex['keratosis_label']}))
+                                {'mask': ex['mask']}))  # ,
+                                            #'melanoma_label': ex['melanoma_label'],
+                                           # 'keratosis_label': ex['keratosis_label']}))
         ds = ds.shuffle(buffer_size=100)
         ds = ds.batch(self.batch)
         ds = ds.prefetch(tf.data.AUTOTUNE)
@@ -77,4 +77,4 @@ class DataPipe:
 # if __name__ == '__main__':
 #     test = DataPipe()
 #     test.transform_all()
-#     test.visualize(test.test, 4, 'Input')
+#     test.visualize(test.val, 4, 'mask')
