@@ -69,7 +69,7 @@ class Isic2017(tfds.core.GeneratorBasedBuilder):
             features=tfds.features.FeaturesDict({
                 # These are the features of your dataset like images, labels ...
                 'image': tfds.features.Image(shape=(None, None, 3)),
-                'mask': tfds.features.Image(shape=(None, None, 3)),
+                'mask': tfds.features.Image(shape=(None, None, 1)),
                 'melanoma_label': tfds.features.ClassLabel(num_classes=2),
                 'keratosis_label': tfds.features.ClassLabel(num_classes=2),
                 # 'ID': tfds.features.Text(),
