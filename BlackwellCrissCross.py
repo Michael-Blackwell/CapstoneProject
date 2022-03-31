@@ -22,8 +22,8 @@ from tensorflow.keras.layers import Conv2D, Softmax, Permute, BatchNormalization
 def INF(B, H, W):
     vec_1d = tf.repeat(tf.constant(float('inf')), repeats=H)
     diag = -tf.linalg.diag(vec_1d)
-    diag = tf.reshape(diag, (1, H, H))  # TODO might not need this
-    ddiag = tf.tile(diag, (W, 1, 1))
+    diag = tf.reshape(diag, (1, H, H))
+    ddiag = tf.tile(diag, (B * W, 1, 1))
     return ddiag
     # return tf.tile(-tf.reshape(-tf.linalg.diag(tf.repeat(tf.constant(float('inf')), repeats=H)), (1, H, H)), (B * W, 1, 1))
 
@@ -52,87 +52,62 @@ class CrissCrossAttention(tf.keras.layers.Layer):
         Value = self.value_conv(x)
 
         # Prepare Query
-        proj_query_H = Permute((3, 1, 2))(Query)
-        proj_query_W = Permute((2, 1, 3))(Query)
+        proj_query_H = Permute((2, 3, 1))(Query)
+        proj_query_H = tf.reshape(proj_query_H, (m_batchsize * width, -1, height))
+        proj_query_H = Permute((2, 1))(proj_query_H)
+
+        proj_query_W = Permute((1, 3, 2))(Query)
+        proj_query_W = tf.reshape(proj_query_W, (m_batchsize * height, -1, width))
+        proj_query_W = Permute((2, 1))(proj_query_W)
 
         # Prepare Key
-        proj_key_H = Permute((3, 1, 2))(Key)
-        proj_key_W = Permute((2, 1, 3))(Key)
+        proj_key_H = Permute((2, 3, 1))(Key)
+        proj_key_H = tf.reshape(proj_key_H, (m_batchsize * width, -1, height))
+
+        proj_key_W = Permute((1, 3, 2))(Key)
+        proj_key_W = tf.reshape(proj_key_W, (m_batchsize * height, -1, width))
 
         # Prepare Value
-        proj_value_H = Permute((3, 1, 2))(Value)
-        proj_value_W = Permute((2, 1, 3))(Value)
+        proj_value_H = Permute((2, 3, 1))(Value)
+        proj_value_H = tf.reshape(proj_value_H, (m_batchsize * width, -1, height))
 
+        proj_value_W = Permute((1, 3, 2))(Value)
+        proj_value_W = tf.reshape(proj_value_W, (m_batchsize * height, -1, width))
 
-
-
-
+        # Apply Affinity Operation
         temp = self.INF(m_batchsize, height, width)
         # H
         energy_H = tf.keras.layers.Dot(axes=(2, 1))([proj_query_H, proj_key_H]) + temp
-        # energy_H = tf.reshape(energy_H, (m_batchsize, width, height, height))
+        energy_H = tf.reshape(energy_H, (m_batchsize, width, height, height))
         energy_H = Permute((2, 1, 3))(energy_H)
         # W
         energy_W = tf.keras.layers.Dot(axes=(2, 1))([proj_query_W, proj_key_W])
-        # energy_W = tf.reshape(energy_W, (m_batchsize, height, width, width))
+        energy_W = tf.reshape(energy_W, (m_batchsize, height, width, width))
 
         concate = self.softmax(tf.concat([energy_H, energy_W], 3))
 
 
-        # proj_query_H = tf.reshape(proj_query_H, shape=(m_batchsize * width, -1, height), name='Query_H_Reshape')
-        # proj_query_H = Permute((2, 1, 3))(proj_query_H)
-
-        # proj_query_W = tf.reshape(proj_query_W, shape=(m_batchsize * height, -1, width), name='Query_W_reshape')
-        # proj_query_W = Permute((2, 1, 3))(proj_query_W)
-
-        # Prepare Key
-        # H
-        # proj_key_H = Permute((3, 1, 2))(Key)
-        # proj_key_H = tf.reshape(proj_key_H, (m_batchsize * width, -1, height), name='key_H_reshape')
-        # W
-        # proj_key_W = Permute((2, 1, 3))(Key)
-        # proj_key_W = tf.reshape(proj_key_W, (m_batchsize * height, -1, width), name='key_W_reshape')
-
-        # Prepare Value
-        # H
-        # proj_value_H = Permute((3, 1, 2))(Value)
-        # proj_value_H = tf.reshape(proj_value_H, (m_batchsize * width, -1, height))
-        # W
-        # proj_value_W = Permute((2, 1, 3))(Value)
-        # proj_value_W = tf.reshape(proj_value_W, (m_batchsize * height, -1, width))
-
-        # Energy
-        # temp = self.INF(m_batchsize, height, width)
-        # # H
-        # energy_H = tf.keras.layers.Dot(axes=(2, 1))([proj_query_H, proj_key_H]) + temp
-        # # energy_H = tf.reshape(energy_H, (m_batchsize, width, height, height))
-        # energy_H = Permute((2, 1, 3))(energy_H)
-        # # W
-        # energy_W = tf.keras.layers.Dot(axes=(2, 1))([proj_query_W, proj_key_W])
-        # # energy_W = tf.reshape(energy_W, (m_batchsize, height, width, width))
-        #
-        # concate = self.softmax(tf.concat([energy_H, energy_W], 3))
-
         # Attention
         # H
-        att_H = Permute((2, 1, 3))(concate[:, :, 0:height, :])
-        # att_H = tf.reshape(att_H, (m_batchsize * width, height, height))
+        att_H = Permute((2, 1, 3))(concate[:, :, :, 0:height])
+        att_H = tf.reshape(att_H, (m_batchsize * width, height, height))
         att_H = Permute((2, 1))(att_H)
 
         # W
-        att_W = concate[:, :, height:height + width, :]
-        # att_W = tf.reshape(att_W, (m_batchsize * height, width, width))
+        att_W = concate[:, :, :, height:height + width]
+        att_W = tf.reshape(att_W, (m_batchsize * height, width, width))
         att_W = Permute((2, 1))(att_W)
 
         # Out
         # H
         out_H = tf.keras.layers.Dot(axes=(2, 1))([proj_value_H, att_H])
-        # out_H = tf.reshape(out_H, (m_batchsize, width, -1, height))
-        out_H = Permute((2, 3, 1))(out_H)
+        out_H = tf.reshape(out_H, (m_batchsize, width, -1, height))
+        out_H = Permute((3, 1, 2))(out_H)
         # W
         out_W = tf.keras.layers.Dot(axes=(2, 1))([proj_value_W, att_W])
-        # out_W = tf.reshape(out_W, (m_batchsize, height, -1, width))
-        out_W = Permute((2, 1, 3))(out_W)
+        out_W = tf.reshape(out_W, (m_batchsize, height, -1, width))
+        out_W = Permute((1, 3, 2))(out_W)
+
 
         # print(out_H.size(),out_W.size())
         return self.gamma * (out_H + out_W) + x
@@ -175,6 +150,6 @@ class RCCAModule(tf.keras.layers.Layer):
 if __name__ == '__main__':
     in_channels = 16
     model = CrissCrossAttention(in_channels)
-    x = tf.constant(np.random.rand(2, in_channels, 5, 8))
+    x = tf.constant(np.random.rand(2, 100, 110, in_channels))
     out = model(x)
     print(out.shape)
