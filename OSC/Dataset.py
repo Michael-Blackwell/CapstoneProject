@@ -63,20 +63,11 @@ class DataPipe:
 
     def _transform(self, ds):
         """Normalizes images: `uint8` -> `float32`."""
-        ds['image'] = self._resize_img(ds['image'])
-        ds['image'] = self._normalize_img(ds['image'])
+        ds['image'] = tf.image.resize(ds['image'], self.image_size[0:2])
+        ds['image'] = tf.image.per_image_standardization(ds['image'])
 
         if 'mask' in self.output:
-            ds['mask'] = self._resize_img(ds['mask'])
-            ds['mask'] = self._normalize_img(ds['mask'])
+            ds['mask'] = tf.image.resize(ds['mask'], self.image_size[0:2])
+            ds['mask'] = ds['mask'] / 255
 
         return ds
-
-    def _resize_img(self, image):
-        """Resizes images to specified shape."""
-        return tf.image.resize(image, self.image_size[0:2])
-
-    @staticmethod
-    def _normalize_img(image):
-        """Normalizes images: `uint8` -> `float32`."""
-        return tf.cast(image, tf.float32) / 255.
