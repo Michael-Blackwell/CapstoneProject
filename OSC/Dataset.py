@@ -33,15 +33,29 @@ class DataPipe:
 
     def transform_all(self):
         """Apply transformations to training, test, and validation datasets."""
+        # train
         self.train = self.apply_transformations(self.train)
-        self.test = self.apply_transformations(self.test)
+        self.train = self.train.cache()
+        self.train = self.train.shuffle(buffer_size=100)
+        self.train = self.train.batch(self.batch, drop_remainder=True)
+        self.train = self.train.prefetch(tf.data.AUTOTUNE)
+
+        # validation
         self.val = self.apply_transformations(self.val)
+        self.val = self.val.cache()
+        self.val = self.val.shuffle(buffer_size=100)
+        self.val = self.val.batch(self.batch, drop_remainder=True)
+        self.val = self.val.prefetch(tf.data.AUTOTUNE)
+
+        # Test
+        # self.test = self.apply_transformations(self.test)
+        # self.test = self.test.batch(self.batch)
 
     def apply_transformations(self, ds):
         """Transform a Dataset: https://www.tensorflow.org/datasets/keras_example#build_a_training_pipeline"""
         ds = ds.map(self._transform,
                     num_parallel_calls=tf.data.AUTOTUNE)
-        ds = ds.cache()
+        # ds = ds.cache()
 
         if 'mask' in self.output and 'label' in self.output:
             ds = ds.map(lambda ex: ({'image': ex['image']},
@@ -56,9 +70,10 @@ class DataPipe:
                                     {'melanoma_label': ex['melanoma_label'],
                                      'keratosis_label': ex['keratosis_label']}))
 
-        ds = ds.shuffle(buffer_size=100)
-        ds = ds.batch(self.batch, drop_remainder=True)
-        ds = ds.prefetch(tf.data.AUTOTUNE)
+        # ds = ds.shuffle(buffer_size=100)
+        # ds = ds.batch(self.batch, drop_remainder=True)
+        # ds = ds.prefetch(tf.data.AUTOTUNE)
+
         return ds
 
     def _transform(self, ds):

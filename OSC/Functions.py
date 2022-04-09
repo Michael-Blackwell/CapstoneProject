@@ -5,9 +5,9 @@ Created: 3/31/22
 """
 import tensorflow as tf
 from tensorflow import keras as K
+from tensorflow.keras.metrics import MeanIoU
 
 
-@tf.function
 def dice_coef_loss(target, prediction, axis=(1, 2), smooth=0.0001):
     """
     Sorenson (Soft) Dice loss
@@ -20,12 +20,11 @@ def dice_coef_loss(target, prediction, axis=(1, 2), smooth=0.0001):
     t = tf.reduce_sum(target, axis=axis)
     numerator = tf.reduce_mean(intersection + smooth)
     denominator = tf.reduce_mean(t + p + smooth)
-    dice_loss = -tf.math.log(2.*numerator) + tf.math.log(denominator)
+    dice_loss = -tf.math.log(2. * numerator) + tf.math.log(denominator)
 
     return dice_loss
 
 
-@tf.function
 def dice_coef(target, prediction, axis=(1, 2), smooth=0.0001):
     """
     Sorenson Dice
@@ -43,7 +42,6 @@ def dice_coef(target, prediction, axis=(1, 2), smooth=0.0001):
     return tf.reduce_mean(coef)
 
 
-@tf.function
 def jaccard_loss(y_true, y_pred, smooth=100):
     """ Calculates mean of Jaccard distance as a loss function """
     intersection = tf.reduce_sum(y_true * y_pred, axis=(1, 2))
@@ -53,13 +51,21 @@ def jaccard_loss(y_true, y_pred, smooth=100):
     return tf.reduce_mean(jd)
 
 
-@tf.function
 def jaccard_distance(y_true, y_pred, smooth=100):
     """ Calculates mean of Jaccard distance."""
-    y_pred = K.backend.round(y_pred)  # Round to 0 or 1
+    y_pred = K.backend.round(y_pred)
 
     intersection = tf.reduce_sum(y_true * y_pred, axis=(1, 2))
     sum_ = tf.reduce_sum(y_true + y_pred, axis=(1, 2))
     jac = (intersection + smooth) / (sum_ - intersection + smooth)
     jd = jac * smooth
     return tf.reduce_mean(jd)
+
+
+class myIOU(MeanIoU):
+    def __init__(self):
+        super().__init__(num_classes=2)
+
+    def update_state(self, y_true, y_pred, sample_weight=None):
+        y_pred = K.backend.round(y_pred)
+        return super().update_state(y_true, y_pred)

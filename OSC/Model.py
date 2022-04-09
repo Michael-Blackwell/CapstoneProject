@@ -3,13 +3,16 @@ Author: mike
 Created: 3/31/22
 
 """
-from ModelFunctions import *
+
 from Functions import *
+import tensorflow_addons as tfa
 import tensorboard
 import pandas as pd
 from pathlib import Path
 from tensorflow.keras.layers import Conv2D, Dropout, BatchNormalization, Permute, Softmax, Conv2DTranspose, MaxPool2D, \
-    Activation
+    Activation, Concatenate
+from tensorflow.keras.metrics import SpecificityAtSensitivity, Recall, AUC
+import logging
 
 
 def INF(B, H, W):
@@ -20,62 +23,37 @@ def INF(B, H, W):
     return ddiag
 
 
-def build_model(image_size, filters=32, kernelsize=3, batch_size=2, recurrence=2, name='CCModel'):
+class CrissCrossAttention(tf.keras.layers.Layer):
+    """Criss-Cross Attention Module"""
 
-    inter_channels = (filters * 8) // 4
-    out_channels = 8
-    num_classes = 2
-    gamma = 0.05
-    cc_imagesize = image_size[0]  # inter_channels  # TODO should be h/w?
+    def __init__(self):
+        super(CrissCrossAttention, self).__init__()
+        self.softmax = Softmax(axis=3)
+        self.INF = INF
 
-    # Input
-    image = tf.keras.Input(shape=image_size, name='image', batch_size=batch_size)
+    def build(self, input_shape):
+        """
 
-    # Convolution
-    x = Conv2D(filters=filters, kernel_size=kernelsize, name='conv_1')(image)
-    x = MaxPool2D(pool_size=3)(x)
-    x = BatchNormalization()(x)
-    x = Activation('relu')(x)
-    x = Dropout(0.1)(x)
+        :param input_shape:
+        :return:
+        """
+        self.query_conv = Conv2D(filters=input_shape[-1] // 8, kernel_size=1)
+        self.key_conv = Conv2D(filters=input_shape[-1] // 8, kernel_size=1)
+        self.value_conv = Conv2D(filters=input_shape[-1], kernel_size=1)
+        self.gamma = tf.Variable(tf.constant(0.05))
 
-    # Convolution
-    x = Conv2D(filters=filters * 2, kernel_size=kernelsize, name='conv_2')(x)
-    x = MaxPool2D(pool_size=3)(x)
-    x = BatchNormalization()(x)
-    x = Activation('relu')(x)
-    x = Dropout(0.1)(x)
+    def call(self, x_in):
+        """
 
-
-    # Convolution
-    x = Conv2D(filters=filters * 4, kernel_size=kernelsize, name='conv_3')(x)
-    x = MaxPool2D(pool_size=3)(x)
-    x = BatchNormalization()(x)
-    x = Activation('relu')(x)
-    x = Dropout(0.1)(x)
-
-
-    # Convolution
-    x = Conv2D(filters=filters * 8, kernel_size=kernelsize, name='conv_4')(x)
-    x = MaxPool2D(pool_size=3)(x)
-    x = BatchNormalization()(x)
-    x = Dropout(0.1)(x)
-
-    # Upsample to 1/8 of input image size
-    kernels = image_size[0] - 1
-    x = Conv2DTranspose(filters=inter_channels, kernel_size=kernels)(x)
-
-    # RCCA
-    x_attn = Conv2D(filters=inter_channels, kernel_size=3, padding='same', use_bias=False, name='ConvA')(x)  # TODO padding
-    x_attn = BatchNormalization()(x_attn)
-
-    # Criss Cross Attention
-    for i in range(recurrence):
-        m_batchsize, height, width, channels = x_attn.shape
+        :param x_in:
+        :return:
+        """
+        m_batchsize, height, width, channels = x_in.shape
 
         # Obtain Query, Key, and Value feature maps
-        Query = Conv2D(filters=cc_imagesize // 8, kernel_size=1, name='QueryConv')(x_attn)
-        Key = Conv2D(filters=cc_imagesize // 8, kernel_size=1, name='KeyConv')(x_attn)
-        Value = Conv2D(filters=cc_imagesize, kernel_size=1, name='ValueConv')(x_attn)
+        Query = self.query_conv(x_in)
+        Key = self.key_conv(x_in)
+        Value = self.value_conv(x_in)
 
         # Prepare Query
         proj_query_H = Permute((2, 3, 1))(Query)
@@ -103,11 +81,13 @@ def build_model(image_size, filters=32, kernelsize=3, batch_size=2, recurrence=2
         # Apply Affinity Operation
         temp = INF(m_batchsize, height, width)
         # H
-        energy_H = tf.keras.layers.Dot(axes=(2, 1))([proj_query_H, proj_key_H]) + temp
+        energy_H = tf.matmul(proj_query_H, proj_key_H) + temp
+        # energy_H = tf.keras.layers.Dot(axes=(2, 1))([proj_query_H, proj_key_H]) + temp
         energy_H = tf.reshape(energy_H, (m_batchsize, width, height, height))
         energy_H = Permute((2, 1, 3))(energy_H)
         # W
-        energy_W = tf.keras.layers.Dot(axes=(2, 1))([proj_query_W, proj_key_W])
+        energy_W = tf.matmul(proj_query_W, proj_key_W)
+        # energy_W = tf.keras.layers.Dot(axes=(2, 1))([proj_query_W, proj_key_W])
         energy_W = tf.reshape(energy_W, (m_batchsize, height, width, width))
 
         concate = Softmax(axis=3)(tf.concat([energy_H, energy_W], 3))
@@ -125,44 +105,146 @@ def build_model(image_size, filters=32, kernelsize=3, batch_size=2, recurrence=2
 
         # Out
         # H
-        out_H = tf.keras.layers.Dot(axes=(2, 1))([proj_value_H, att_H])
+        out_H = tf.matmul(proj_value_H, att_H)
+        # out_H = tf.keras.layers.Dot(axes=(2, 1))([proj_value_H, att_H])
         out_H = tf.reshape(out_H, (m_batchsize, width, -1, height))
         out_H = Permute((3, 1, 2))(out_H)
         # W
-        out_W = tf.keras.layers.Dot(axes=(2, 1))([proj_value_W, att_W])
+        out_W = tf.matmul(proj_value_W, att_W)
+        # out_W = tf.keras.layers.Dot(axes=(2, 1))([proj_value_W, att_W])
         out_W = tf.reshape(out_W, (m_batchsize, height, -1, width))
         out_W = Permute((1, 3, 2))(out_W)
 
-        x_attn = gamma * (out_H + out_W) + x_attn
+        return self.gamma * (out_H + out_W) + x_in
 
 
-    #Output
-    x_attn = Conv2D(filters=inter_channels, kernel_size=3, padding='same', use_bias=False, name='ConvB')(x_attn)  # TODO padding
+def build_model(image_size, filters=32, kernelsize=3, batch_size=2, recurrence=2, name='CCModel'):
+    num_classes = 2
+
+    # Convolution parameters
+    conv_params = dict(kernel_size=(3, 3), activation="relu",
+                       padding="same",
+                       kernel_initializer="he_uniform")
+
+    # Transposed convolution parameters
+    deconv_params = dict(kernel_size=(2, 2), strides=(2, 2),
+                         padding="same")
+
+    # Define the model
+    image = tf.keras.Input(shape=image_size, name='image', batch_size=batch_size)
+
+    # Convolution 1 (510x510)
+    x = Conv2D(filters=filters, name='conv_1_1', **conv_params)(image)
+    x1 = Conv2D(filters=filters, name='conv_1_2', **conv_params)(x)
+    x = MaxPool2D(pool_size=2)(x1)
+    x = BatchNormalization(axis=3)(x)
+    x = Dropout(0.1)(x)
+
+    # Convolution 2 (253x253)
+    x = Conv2D(filters=filters * 2, name='conv_2_1', **conv_params)(x)
+    x2 = Conv2D(filters=filters * 2, name='conv_2_2', **conv_params)(x)
+    x = MaxPool2D(pool_size=2)(x2)
+    x = BatchNormalization(axis=3)(x)
+    x = Dropout(0.1)(x)
+
+    # Convolution 3 (124x124)
+    x = Conv2D(filters=filters * 4, name='conv_3_1', **conv_params)(x)
+    x3 = Conv2D(filters=filters * 4, name='conv_3_2', **conv_params)(x)
+    x = MaxPool2D(pool_size=2)(x3)
+    x = BatchNormalization(axis=3)(x)
+    x = Dropout(0.1)(x)
+
+    # Convolution 4 (60x60)
+    x = Conv2D(filters=filters * 8, name='conv_4_1', **conv_params)(x)
+    x4 = Conv2D(filters=filters * 8, name='conv_4_2', **conv_params)(x)
+    x = MaxPool2D(pool_size=2)(x4)
+    x = BatchNormalization(axis=3)(x)
+    x = Dropout(0.1)(x)
+
+    # Convolution 5
+    x = Conv2D(filters=filters * 16, name='conv_5_1', **conv_params)(x)
+    x5 = Conv2D(filters=filters * 16, name='conv_5_2', **conv_params)(x)
+    x = MaxPool2D(pool_size=2)(x5)
+    x = BatchNormalization(axis=3)(x)
+    x = Dropout(0.1)(x)
+
+    # Deconvolution 1
+    x = Conv2DTranspose(filters=filters * 8, name='deconv_1_1', **deconv_params)(x)
+    x = Concatenate(axis=-1)([x, x5])
+
+    x = Conv2D(filters=filters * 8, name='deconv_1_2', **conv_params)(x)
+    x = Conv2D(filters=filters * 8, name='deconv_1_3', **conv_params)(x)
+    x = BatchNormalization(axis=3)(x)
+    x = Dropout(0.1)(x)
+
+    # Deconvolution 2
+    x = Conv2DTranspose(filters=filters * 4, name='deconv_2_1', **deconv_params)(x)
+    x = Concatenate(axis=-1)([x, x4])
+
+    x = Conv2D(filters=filters * 4, name='deconv_2_2', **conv_params)(x)
+    x = Conv2D(filters=filters * 4, name='deconv_2_3', **conv_params)(x)
+    x = BatchNormalization(axis=3)(x)
+    x = Dropout(0.1)(x)
+    # x = Dropout(0.1)(x)
+
+    # RCCA
+    x_attn = Conv2D(filters=filters * 4, name='ConvA', **conv_params)(x)  # TODO padding
     x_attn = BatchNormalization()(x_attn)
 
-    x_attn = Conv2D(filters=out_channels, kernel_size=3, padding='same', use_bias=False)(tf.concat([x, x_attn], 3))  # TODO padding
-    x_attn = BatchNormalization()(x_attn)  # TODO normalize by features axis
+    # Criss Cross Attention
+    for i in range(recurrence):
+        x_attn = CrissCrossAttention()(x_attn)
+
+    x_attn = Conv2D(filters=filters * 2, kernel_size=1, padding='same', use_bias=False)(
+        tf.concat([x, x_attn], 3))  # TODO padding
+    x_attn = BatchNormalization(axis=3)(x_attn)
     x_attn = Dropout(0.1)(x_attn)
-    x_attn = Conv2D(filters=num_classes, kernel_size=1, use_bias=True)(x_attn)
+    # x_attn = Conv2D(filters=num_classes, kernel_size=1, use_bias=True)(x_attn)
+
+    # Deconvolution 3
+    x = Conv2DTranspose(filters=filters * 2, name='deconv_3', **deconv_params)(x)
+    x = Concatenate(axis=-1)([x, x3])
+
+    x = Conv2D(filters=filters * 2, name='deconv_3_2', **conv_params)(x)
+    x = Conv2D(filters=filters * 2, name='deconv_3_3', **conv_params)(x)
+    x = BatchNormalization(axis=3)(x)
+    x = Dropout(0.1)(x)
+
+    # Deconvolution 4
+    x = Conv2DTranspose(filters=filters, name='deconv_4_1', **deconv_params)(x)
+    x = Concatenate(axis=-1)([x, x2])
+
+    x = Conv2D(filters=filters, name='deconv_4_2', **conv_params)(x)
+    x = Conv2D(filters=filters, name='deconv_4_3', **conv_params)(x)
+    x = BatchNormalization(axis=3)(x)
+
+    # Deconvolution 5
+    x = Conv2DTranspose(filters=filters, name='deconv_5_1', **deconv_params)(x)
+    x = Concatenate(axis=-1)([x, x1])
+
+    x = Conv2D(filters=filters, name='deconv_5_2', **conv_params)(x)
+    x = Conv2D(filters=num_classes, name='deconv_5_3', **conv_params)(x)
+    x = BatchNormalization(axis=3)(x)
 
     # x = Conv2D(filters=1, kernel_size=1, activation='relu', padding='same')(x)
-    mask = Conv2D(filters=1, kernel_size=1, activation='sigmoid', name='mask')(x_attn)
-    # mask = mask_out(x)
-
-    # TODO Define hybrid (weighted) Loss Function
-    # def hybrid_loss(y_true, y_pred): todo focal & binary cross entropy loss 50/50
-
-    # todo metrics -> jaccard/dice & binary accuracy
+    mask = Conv2D(filters=1, kernel_size=1, activation='sigmoid', name='mask')(x)
 
     # Define the model.
-    model = tf.keras.Model(inputs=[image], outputs=[mask], #melanoma, keratosis],
+    model = tf.keras.Model(inputs=[image], outputs=[mask],  # melanoma, keratosis],
                            name=name)
 
     # Compile model
     model.compile(
-        loss=dice_coef_loss, # tfa.losses.sigmoid_focal_crossentropy,  # 'categorical_crossentropy',  # tfa.losses.sigmoid_focal_crossentropy,
+        loss=jaccard_loss,
+        # tfa.losses.sigmoid_focal_crossentropy,  # 'categorical_crossentropy',  # tfa.losses.sigmoid_focal_crossentropy,
         optimizer='Adam',  # tf.keras.optimizers.Adam(learning_rate=lr_schedule),
-        metrics=[dice_coef, "accuracy"]  # , tfa.metrics.MultiLabelConfusionMatrix],
+        metrics=[dice_coef,
+                 jaccard_distance,
+                 myIOU(),
+                 SpecificityAtSensitivity(0.5),
+                 Recall(),
+                 AUC()
+                 ]  # , tfa.metrics.MultiLabelConfusionMatrix],
     )
 
     return model
@@ -176,21 +258,18 @@ def callbacks(ts: pd.Timestamp) -> tuple:
     """
 
     # Create folders.
-    tb_path = Path.cwd() / f'Callbacks/tensorboard/{ts}'
-    ckpt_path = Path.cwd() / f'Callbacks/checkpoints/{ts}'
-    early_stop_path = Path.cwd() / f'Callbacks/earlystopping/{ts}'
+    tb_path = Path(f'/media/storage/Capstone1/Callbacks/tensorboard/{ts}')
+    ckpt_path = Path(f'/media/storage/Capstone1/Callbacks/checkpoints/{ts}')
+    early_stop_path = Path(f'/media/storage/Capstone1/Callbacks/earlystopping/{ts}')
 
     ckpt_path.mkdir()
     tb_path.mkdir()
     early_stop_path.mkdir()
 
     # Define callbacks
-    tensorboard_cb = tf.keras.callbacks.TensorBoard(log_dir=str(tb_path),
-                                                    write_images=True,
-                                                    histogram_freq=1,
-                                                    )
+    tensorboard_cb = tf.keras.callbacks.TensorBoard(log_dir=str(tb_path))
     checkpoint_cb = tf.keras.callbacks.ModelCheckpoint(filepath=str(ckpt_path), save_best_only=True)
-    early_stopping_cb = tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True)
+    early_stopping_cb = tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True)
 
     # TODO add confusion matrix & jaccard/dice callbacks
 
@@ -200,12 +279,13 @@ def callbacks(ts: pd.Timestamp) -> tuple:
 
 
 def train_model(model, data_pipe, epochs: int, ts):
-
+    logger = logging.getLogger(__name__)
     calls, tb_path = callbacks(ts)
+    logger.log(logging.INFO, 'Callbacks Created')
 
     # Launch Tensorboard, can be accessed by going to http://localhost:6006 in your browser
-    tb = tensorboard.program.TensorBoard()
-    tb.configure(argv=[None, '--logdir', str(tb_path)])
+    # tb = tensorboard.program.TensorBoard()
+    # tb.configure(argv=[None, '--logdir', str(tb_path)])
     # url = tb.launch()
 
     # Change to 'CPU:0' to use CPU instead of GPU
@@ -217,4 +297,7 @@ def train_model(model, data_pipe, epochs: int, ts):
             callbacks=calls
         )
 
+    logger.log(logging.INFO, 'Training Complete')
+
     return model
+
