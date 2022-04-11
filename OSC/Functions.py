@@ -8,6 +8,7 @@ from tensorflow import keras as K
 from tensorflow.keras.metrics import MeanIoU
 
 
+@tf.function
 def dice_coef_loss(target, prediction, axis=(1, 2), smooth=0.0001):
     """
     Sorenson (Soft) Dice loss
@@ -25,6 +26,7 @@ def dice_coef_loss(target, prediction, axis=(1, 2), smooth=0.0001):
     return dice_loss
 
 
+@tf.function
 def dice_coef(target, prediction, axis=(1, 2), smooth=0.0001):
     """
     Sorenson Dice
@@ -42,6 +44,7 @@ def dice_coef(target, prediction, axis=(1, 2), smooth=0.0001):
     return tf.reduce_mean(coef)
 
 
+@tf.function
 def jaccard_loss(y_true, y_pred, smooth=100):
     """ Calculates mean of Jaccard distance as a loss function """
     intersection = tf.reduce_sum(y_true * y_pred, axis=(1, 2))
@@ -51,21 +54,26 @@ def jaccard_loss(y_true, y_pred, smooth=100):
     return tf.reduce_mean(jd)
 
 
+@tf.function
 def jaccard_distance(y_true, y_pred, smooth=100):
     """ Calculates mean of Jaccard distance."""
     y_pred = K.backend.round(y_pred)
 
     intersection = tf.reduce_sum(y_true * y_pred, axis=(1, 2))
     sum_ = tf.reduce_sum(y_true + y_pred, axis=(1, 2))
-    jac = (intersection + smooth) / (sum_ - intersection + smooth)
+    jac = (intersection + 1) / (sum_ - intersection + 1)
     jd = jac * smooth
     return tf.reduce_mean(jd)
 
 
 class myIOU(MeanIoU):
-    def __init__(self):
-        super().__init__(num_classes=2)
+    def __init__(self, name='my_iou', dtype=None, num_classes=2):
+        super(myIOU, self).__init__(num_classes=num_classes)
 
     def update_state(self, y_true, y_pred, sample_weight=None):
         y_pred = K.backend.round(y_pred)
         return super().update_state(y_true, y_pred)
+
+    def get_config(self):
+        base_config = super().get_config()
+        return base_config

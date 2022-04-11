@@ -5,12 +5,11 @@ Created: 3/31/22
 """
 
 from Functions import *
-import tensorflow_addons as tfa
 import tensorboard
 import pandas as pd
 from pathlib import Path
 from tensorflow.keras.layers import Conv2D, Dropout, BatchNormalization, Permute, Softmax, Conv2DTranspose, MaxPool2D, \
-    Activation, Concatenate
+    Concatenate, Attention
 from tensorflow.keras.metrics import SpecificityAtSensitivity, Recall, AUC
 import logging
 
@@ -27,9 +26,7 @@ class CrissCrossAttention(tf.keras.layers.Layer):
     """Criss-Cross Attention Module"""
 
     def __init__(self):
-        super(CrissCrossAttention, self).__init__()
-        self.softmax = Softmax(axis=3)
-        self.INF = INF
+        super().__init__()
 
     def build(self, input_shape):
         """
@@ -41,6 +38,8 @@ class CrissCrossAttention(tf.keras.layers.Layer):
         self.key_conv = Conv2D(filters=input_shape[-1] // 8, kernel_size=1)
         self.value_conv = Conv2D(filters=input_shape[-1], kernel_size=1)
         self.gamma = tf.Variable(tf.constant(0.05))
+        self.softmax = Softmax(axis=3)
+        self.INF = INF
 
     def call(self, x_in):
         """
@@ -118,7 +117,47 @@ class CrissCrossAttention(tf.keras.layers.Layer):
         return self.gamma * (out_H + out_W) + x_in
 
 
-def build_model(image_size, filters=32, kernelsize=3, batch_size=2, recurrence=2, name='CCModel'):
+# class SelfAttn(tf.keras.layers.Layer):
+#     def __init__(self, use_scale=True):
+#         super(SelfAttn, self).__init__()
+#         self.use_scale = use_scale
+#
+#     def build(self, input_shape):
+#         self.attn = Attention(use_scale=self.use_scale)
+#
+#     def call(self, x_in):
+#         x_in = Permute((3, 1, 2))(x_in)
+#         x_in = self.attn([x_in, x_in, x_in])
+#         return Permute((2, 3, 1))(x_in)
+#
+#     def get_config(self):
+#         base_config = super().get_config()
+#         return base_config
+
+
+class SelfAttn(tf.keras.layers.Layer):
+    def __init__(self, use_scale=True):
+        super(SelfAttn, self).__init__()
+        self.use_scale = use_scale
+
+    def build(self, input_shape):
+        self.attn1 = Attention(use_scale=self.use_scale)
+        self.attn2 = Attention(use_scale=self.use_scale)
+        self.conv = Conv2D(filters=input_shape[-1], kernel_size=1, activation='relu')
+
+    def call(self, x_in):
+        x_h = Permute((2, 1, 3))(x_in)
+        x_h = self.attn1([x_h, x_h])
+        x_w = self.attn2([x_in, x_in])
+        x_out = self.conv(tf.concat([x_h, x_w], axis=3))
+        return x_out
+
+    def get_config(self):
+        base_config = super().get_config()
+        return base_config
+
+
+def build_model(image_size, filters=32, kernelsize=3, recurrence=2, name='CCModel'):
     num_classes = 2
 
     # Convolution parameters
@@ -131,7 +170,7 @@ def build_model(image_size, filters=32, kernelsize=3, batch_size=2, recurrence=2
                          padding="same")
 
     # Define the model
-    image = tf.keras.Input(shape=image_size, name='image', batch_size=batch_size)
+    image = tf.keras.Input(shape=image_size, name='image')
 
     # Convolution 1 (510x510)
     x = Conv2D(filters=filters, name='conv_1_1', **conv_params)(image)
@@ -193,7 +232,8 @@ def build_model(image_size, filters=32, kernelsize=3, batch_size=2, recurrence=2
 
     # Criss Cross Attention
     for i in range(recurrence):
-        x_attn = CrissCrossAttention()(x_attn)
+        # x_attn = CrissCrossAttention()(x_attn)
+        x_attn = SelfAttn()(x_attn)
 
     x_attn = Conv2D(filters=filters * 2, kernel_size=1, padding='same', use_bias=False)(
         tf.concat([x, x_attn], 3))  # TODO padding
@@ -202,7 +242,7 @@ def build_model(image_size, filters=32, kernelsize=3, batch_size=2, recurrence=2
     # x_attn = Conv2D(filters=num_classes, kernel_size=1, use_bias=True)(x_attn)
 
     # Deconvolution 3
-    x = Conv2DTranspose(filters=filters * 2, name='deconv_3', **deconv_params)(x)
+    x = Conv2DTranspose(filters=filters * 2, name='deconv_3', **deconv_params)(x_attn)
     x = Concatenate(axis=-1)([x, x3])
 
     x = Conv2D(filters=filters * 2, name='deconv_3_2', **conv_params)(x)
@@ -235,16 +275,15 @@ def build_model(image_size, filters=32, kernelsize=3, batch_size=2, recurrence=2
 
     # Compile model
     model.compile(
-        loss=jaccard_loss,
-        # tfa.losses.sigmoid_focal_crossentropy,  # 'categorical_crossentropy',  # tfa.losses.sigmoid_focal_crossentropy,
-        optimizer='Adam',  # tf.keras.optimizers.Adam(learning_rate=lr_schedule),
+        loss='binary_crossentropy', # jaccard_loss,
+        optimizer='Adam',
         metrics=[dice_coef,
                  jaccard_distance,
                  myIOU(),
-                 SpecificityAtSensitivity(0.5),
-                 Recall(),
+                 # SpecificityAtSensitivity(0.5, class_id=1),
+                 Recall(thresholds=0.5),
                  AUC()
-                 ]  # , tfa.metrics.MultiLabelConfusionMatrix],
+                 ]
     )
 
     return model
@@ -269,7 +308,7 @@ def callbacks(ts: pd.Timestamp) -> tuple:
     # Define callbacks
     tensorboard_cb = tf.keras.callbacks.TensorBoard(log_dir=str(tb_path))
     checkpoint_cb = tf.keras.callbacks.ModelCheckpoint(filepath=str(ckpt_path), save_best_only=True)
-    early_stopping_cb = tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True)
+    early_stopping_cb = tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True)
 
     # TODO add confusion matrix & jaccard/dice callbacks
 
@@ -284,9 +323,9 @@ def train_model(model, data_pipe, epochs: int, ts):
     logger.log(logging.INFO, 'Callbacks Created')
 
     # Launch Tensorboard, can be accessed by going to http://localhost:6006 in your browser
-    # tb = tensorboard.program.TensorBoard()
-    # tb.configure(argv=[None, '--logdir', str(tb_path)])
-    # url = tb.launch()
+    tb = tensorboard.program.TensorBoard()
+    tb.configure(argv=[None, '--logdir', str(tb_path)])
+    url = tb.launch()
 
     # Change to 'CPU:0' to use CPU instead of GPU
     with tf.device('GPU:0'):
