@@ -12,7 +12,8 @@ from playsound import playsound
 
 
 ts = pd.Timestamp.now().strftime('%Y-%m-%d_%H.%M.%S')
-save_path = Path(f'/media/storage/Capstone1/Models/BinLoss_Unet_{ts}')
+save_path = Path(f'/media/storage/Capstone1/Models/Attn_Focal_{ts}')
+callback_path = Path(f'/media/storage/Capstone1/Callbacks')
 # log_path = Path(f'/media/storage/Capstone1/Logs/{ts}.txt')
 #
 # logging.basicConfig(level=logging.WARN,
@@ -22,20 +23,18 @@ save_path = Path(f'/media/storage/Capstone1/Models/BinLoss_Unet_{ts}')
 image_size = (512, 512, 3)
 epochs = 30
 filters = 16
-kernel_size = 3
 batch_size = 4
-recurr = 2
 
 # mirrored_strategy = tf.distribute.MirroredStrategy()
 # with mirrored_strategy.scope():
-model = build_model(image_size, filters=filters, kernelsize=kernel_size, recurrence=recurr)
+model = build_model(image_size, filters=filters)
 
 dataset = DataPipe(batch=batch_size, image_size=image_size, output='masks')
 dataset.transform_all()
 
 if __name__ == '__main__':
     logger = logging.getLogger(__name__)
-    model = train_model(model, dataset, epochs=epochs, ts=ts)
+    model = train_model(model, dataset, epochs=epochs, ts=ts, callback_path=callback_path)
     model.save(save_path)
 
     count = 0

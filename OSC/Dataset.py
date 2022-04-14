@@ -12,7 +12,7 @@ class DataPipe:
     def __init__(self,
                  dataset_name='isic2017',
                  dataset_path='/media/storage/Datasets',
-                 batch=16,
+                 batch=4,
                  image_size=(512, 512, 3),
                  output=('labels', 'masks')):
         (self.train, self.val, self.test), self._info = tfds.load(name=dataset_name,
@@ -57,18 +57,16 @@ class DataPipe:
                     num_parallel_calls=tf.data.AUTOTUNE)
         # ds = ds.cache()
 
-        if 'mask' in self.output and 'label' in self.output:
+        if 'masks' in self.output and 'labels' in self.output:
             ds = ds.map(lambda ex: ({'image': ex['image']},
                                     {'mask': ex['mask'],
-                                     'melanoma_label': ex['melanoma_label'],
-                                     'keratosis_label': ex['keratosis_label']}))
-        elif 'mask' in self.output:
+                                     'label': ex['label']}))
+        elif 'masks' in self.output:
             ds = ds.map(lambda ex: ({'image': ex['image']},
                                     {'mask': ex['mask']}))
-        elif 'label' in self.output:
+        elif 'labels' in self.output:
             ds = ds.map(lambda ex: ({'image': ex['image']},
-                                    {'melanoma_label': ex['melanoma_label'],
-                                     'keratosis_label': ex['keratosis_label']}))
+                                    {'label': ex['label']}))
 
         # ds = ds.shuffle(buffer_size=100)
         # ds = ds.batch(self.batch, drop_remainder=True)
@@ -81,8 +79,12 @@ class DataPipe:
         ds['image'] = tf.image.resize(ds['image'], self.image_size[0:2])
         ds['image'] = tf.image.per_image_standardization(ds['image'])
 
-        if 'mask' in self.output:
+        if 'masks' in self.output:
             ds['mask'] = tf.image.resize(ds['mask'], self.image_size[0:2])
             ds['mask'] = ds['mask'] / 255
+
+        if 'labels' in self.output:
+            ds['label'] = tf.one_hot(ds['label'], 3)
+            # ds['keratosis_label'] = tf.reshape(ds['keratosis_label'], [1])
 
         return ds
