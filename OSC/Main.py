@@ -3,7 +3,7 @@ Author: mike
 Created: 3/31/22
 
 """
-from OSC.Modelv3 import *
+from OSC.Model import *
 from OSC.Dataset import DataPipe
 import logging
 
