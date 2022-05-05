@@ -18,7 +18,7 @@
 ["CrissCross"](https://github.com/speedinghzl/CCNet) Attention Weighted U-Net
 
 ## Results
-***
+
 ### Metrics
 | Model                                              | Dice    | mIoU   | Recall     | Precision | 
 |----------------------------------------------------|---------|--------|------------|-----------|
@@ -34,7 +34,7 @@
 | [**Intel U-Net**](https://github.com/IntelAI/unet)     | 12,153,913,344 | 1,941,105        | 0                    | 1,941,105    |
 
 ## Primary References
-***
+
 Criss Cross Attention |  https://github.com/speedinghzl/CCNet
 
 Attention is All You Need | https://arxiv.org/abs/1706.03762
