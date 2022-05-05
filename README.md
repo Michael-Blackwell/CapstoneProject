@@ -13,7 +13,6 @@
 
 
 ## Proposed Model
-***
 
 ["CrissCross"](https://github.com/speedinghzl/CCNet) Attention Weighted U-Net
 
