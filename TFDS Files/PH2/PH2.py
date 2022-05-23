@@ -1,6 +1,8 @@
 """PH2 dataset.
 
-Using the TFDS CLI to build this dataset, the data location and output must be specified:
+Using the TFDS CLI to build this dataset, the data location and output must be specified. In a terminal, change to the
+directory containing this python script and run the following command:
+
 tfds build --data_dir=<Out_Path> --manual_dir=<Data_Parent_Folder>
 
 For more information on this process refer to the documentation:
@@ -99,6 +101,6 @@ class Ph2(tfds.core.GeneratorBasedBuilder):
 
         for idx, labs in labels.iterrows():
             yield labs['Image Name'], {
-                'image': path / f'PH2 Dataset images/{labs["Image Name"]}/{labs["Image Name"]}_Dermoscopic_Image/{labs["Image Name"]}.bmp',
-                'mask': path / f'PH2 Dataset images/{labs["Image Name"]}/{labs["Image Name"]}_lesion/{labs["Image Name"]}_lesion.bmp'
+                'image': path / f'PH2 Dataset images/{labs["Image Name"]}/{labs["Image Name"]}_Dermoscopic_Image/{labs["Image Name"]}.png',
+                'mask': path / f'PH2 Dataset images/{labs["Image Name"]}/{labs["Image Name"]}_lesion/{labs["Image Name"]}_lesion.png'
             }
