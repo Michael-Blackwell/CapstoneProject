@@ -12,6 +12,8 @@ https://www.tensorflow.org/datasets/add_dataset#write_your_dataset
 import tensorflow_datasets as tfds
 import pandas as pd
 from sklearn.model_selection import train_test_split
+from pathlib import Path
+from PIL import Image
 
 # (ISIC2017): Markdown description  that will appear on the catalog page.
 _DESCRIPTION = """
@@ -69,8 +71,14 @@ class Ph2(tfds.core.GeneratorBasedBuilder):
     def _split_generators(self, dl_manager: tfds.download.DownloadManager):
         """Returns SplitGenerators."""
         # (ISIC2017): Downloads the data and defines the splits
-        base = dl_manager.manual_dir / 'PH2Dataset'
+        base = dl_manager.manual_dir / 'PH2Dataset/PH2 Dataset images'
 
+        # save all .bmp files as .png
+        for img in base.rglob('*.bmp'):
+            new_path = img.parent / (img.stem + '.png')
+            Image.open(img).save(new_path)
+
+        # Read labels file and split into train, val, test sets
         labels = pd.read_excel(f'{data_path}/PH2_dataset.xlsx', header=12, usecols=['Image Name', 'Atypical Nevus', 'Melanoma'])
         labels = labels.fillna(0)
         labels = labels.replace(to_replace='X', value=1)
@@ -101,6 +109,6 @@ class Ph2(tfds.core.GeneratorBasedBuilder):
 
         for idx, labs in labels.iterrows():
             yield labs['Image Name'], {
-                'image': path / f'PH2 Dataset images/{labs["Image Name"]}/{labs["Image Name"]}_Dermoscopic_Image/{labs["Image Name"]}.png',
-                'mask': path / f'PH2 Dataset images/{labs["Image Name"]}/{labs["Image Name"]}_lesion/{labs["Image Name"]}_lesion.png'
+                'image': path / f'{labs["Image Name"]}/{labs["Image Name"]}_Dermoscopic_Image/{labs["Image Name"]}.png',
+                'mask': path / f'{labs["Image Name"]}/{labs["Image Name"]}_lesion/{labs["Image Name"]}_lesion.png'
             }
