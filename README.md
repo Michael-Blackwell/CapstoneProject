@@ -4,12 +4,11 @@
 
 **objective:** To enhance the performance of an FCNN by using attention weighting on the extracted features. 
 
-**Data Set:** 
+**Data Sets:** 
  
-2017 ISIC Dataset - https://challenge.isic-archive.com/data/#2017
+[2017 ISIC Dataset](https://challenge.isic-archive.com/data/#2017)
 
-- Dataset Home Page: https://challenge.isic-archive.com/landing/2017/
-
+[PH2 Dataset](https://www.fc.up.pt/addi/ph2%20database.html)
 
 
 ## Proposed Model
@@ -19,11 +18,24 @@
 ## Results
 
 ### Metrics
+
+#### ISIC2017
+
 | Model                                              | Dice    | mIoU   | Recall     | Precision | 
 |----------------------------------------------------|---------|--------|------------|-----------|
 | W/ Attention                                       | 0.8106  | 0.8029 |  0.7674    |   0.8893  |
 | W/O Attention                                      | 0.7596  | 0.7612 |  0.7211    |   0.8486  |
 | [**Intel U-Net**](https://github.com/IntelAI/unet) | 0.7753  | 0.7623 |  0.665     |  0.8946   |
+
+#### PH2
+
+| Model                                              | Dice    | mIoU | Recall   | Precision | 
+|----------------------------------------------------|---------|------|----------|---------|
+| W/ Attention                                       | 0.9374  | 0.8820 |  0.9188  |   0.9549 |
+| W/O Attention                                      | 0.9136  | 0.8381 |  0.9257  |   0.9014 |
+| [**Intel U-Net**](https://github.com/IntelAI/unet) |   |  |       |     |
+
+
 
 ### Model Information
 | Model         | Flops          | Trainable Params | Non-Trainable Params | Total Params | 
